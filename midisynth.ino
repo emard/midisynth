@@ -189,7 +189,7 @@ void setup()
     // Initiate MIDI communications, listen to all channels
     MIDI.begin(MIDI_CHANNEL_OMNI);
 
-    #if 1
+    #if 0
     *voice = 69 | (1000<<8);
     *pitch = 3000000;
     delay(500);
@@ -198,7 +198,7 @@ void setup()
     *voice = 69;
     #endif
 
-    freq_init(1);
+    freq_init(0);
     led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
     #if 1
     key(69,7,1,db_sine1x);
@@ -207,7 +207,18 @@ void setup()
     *led_indicator_pointer = 0;
     key(69,-7,1,db_sine1x);
     #endif
-    
+
+    #if 0
+    // key click test
+    int i;
+    for(i = 0; i < 40; i++)
+    {
+      key(75,6,1,db_sine1x);
+      delay(100);
+      key(75,-6,1,-db_sine1x);
+      delay(10);
+    }
+    #endif
 }
 
 void loop()
