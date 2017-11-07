@@ -24,9 +24,10 @@ int led_indicator_pin = LED;
 uint8_t led_value = 0;
 volatile uint32_t *led_indicator_pointer; // address of LED MMIO register
 
-volatile uint32_t *synth = (uint32_t *)0xFFFFFBB0; // voices
-volatile uint32_t *freq  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
+volatile uint32_t *voice = (uint32_t *)0xFFFFFBB0; // voices
+volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
 int16_t volume[128], target[128];
+uint32_t freq[128]; // freqency list
 
 // constants for frequency table caculation
 const int C_clk_freq = 50000000; // Hz system clock
@@ -75,8 +76,8 @@ void freq_init(int transpose)
   {
     int octave = i / C_tones_per_octave;
     int meantone = i % C_tones_per_octave;
-    *synth = (i - transpose) % (1 << C_voice_addr_bits);
-    *freq = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
+    *voice = (i - transpose) % (1 << C_voice_addr_bits);
+    *pitch = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
   }
 }
 
@@ -124,20 +125,20 @@ void key(uint8_t key, int16_t vol, uint8_t apply, uint64_t registration)
   uint64_t r = registration;
   uint8_t db_val;
   int16_t db_volume;
-  int8_t voice;
+  int8_t v; // voice number
   uint8_t a; // voice address uint
   for(i = drawbar_count-1; i >= 0; i--)
   {
     db_val = r & 15;
     r >>= 4;
-    voice = key+drawbar_voice[i];
-    if(voice >= 0)
+    v = key+drawbar_voice[i];
+    if(v >= 0)
     {
-      a = voice;
+      a = v;
       db_volume = (1 << db_val)/2;
       volume[a] += vol * db_volume;
       if(apply)
-       *synth = a | (volume[a] << 8);
+       *voice = a | (volume[a] << 8);
     }
   }
 }
@@ -187,12 +188,12 @@ void setup()
     MIDI.begin(MIDI_CHANNEL_OMNI);
 
     #if 1
-    *synth = 69 | (1000<<8);
-    *freq = 5000000;
+    *voice = 69 | (1000<<8);
+    *pitch = 3000000;
     delay(500);
-    *freq = 10000000;
+    *pitch = 4000000;
     delay(500);
-    *synth = 69;
+    *voice = 69;
     #endif
 
     freq_init(1);
