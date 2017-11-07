@@ -118,10 +118,11 @@ const int drawbar_count = 9;
 uint8_t drawbar_voice[9] = {0,19,12,24,31,36,40,43,48}; // voice offset for drawbars
 
 int key_volume = 1; // key volume 1-7
+uint8_t last_pitch = 0; // last note played, for the pitch bend
 
 
 // key press: set of voice volumes according to the registration
-void key(uint8_t key, int16_t vol, uint8_t apply, uint64_t registration)
+void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registration)
 {
   int i;
   uint64_t r = registration;
@@ -140,7 +141,10 @@ void key(uint8_t key, int16_t vol, uint8_t apply, uint64_t registration)
       db_volume = (1 << db_val)/2;
       volume[a] += vol * db_volume;
       if(apply)
+      {
        *voice = a | (volume[a] << 8);
+       *pitch = freq[a] + 10*bend;
+      }
     }
   }
 }
@@ -157,9 +161,10 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 {
     //if(channel == 1)
     {
-      key(pitch, key_volume, 1, pitch < 60 ? reg_lower : reg_upper);
+      key(pitch, key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
+      last_pitch = pitch; // for pitch bend
     }
 }
 
@@ -167,10 +172,21 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
     //if(channel == 1)
     {
-      key(pitch, -key_volume, 1, pitch < 60 ? reg_lower : reg_upper);
+      key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
+}
+
+void handlePitchBend(byte channel, int bend)
+{
+  key(last_pitch, 0, bend, 1, last_pitch < 60 ? reg_lower : reg_upper);
+  #if 0
+  bend_float = (float) bend;              // Convert bend (int) to float type to get also the after zero numbers
+  float bendfactor = (1+ bend_float/8190);      // Calculate the bend factor, with wich the tone() in [hz] shall be bended. Bendfactor shall be between 0.1 and 2, if no bending is applied --> 1.
+  if ((freq*bendfactor) > 50)                 // To prevent the output from beeing in an unstable state when note is not properly ended (e.g. not "OFF" has been send
+      tone(tonePin,freq*bendfactor);              // Write pitchbended tone to the output. E.g. bend: 8192: 440Hz * 2  --> 880hz --> one Octave higher
+  #endif
 }
 
 // -----------------------------------------------------------------------------
@@ -185,6 +201,9 @@ void setup()
 
     // Do the same for NoteOffs
     MIDI.setHandleNoteOff(handleNoteOff);
+
+    // Handle the Pitch Bend
+    MIDI.setHandlePitchBend(handlePitchBend);
 
     // Initiate MIDI communications, listen to all channels
     MIDI.begin(MIDI_CHANNEL_OMNI);
@@ -201,11 +220,11 @@ void setup()
     freq_init(0);
     led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
     #if 1
-    key(69,7,1,db_sine1x);
+    key(69,7,0,1,db_sine1x);
     *led_indicator_pointer = 255;
     delay(500);
     *led_indicator_pointer = 0;
-    key(69,-7,1,db_sine1x);
+    key(69,-7,0,1,db_sine1x);
     #endif
 
     #if 0
@@ -213,9 +232,9 @@ void setup()
     int i;
     for(i = 0; i < 40; i++)
     {
-      key(75,6,1,db_sine1x);
+      key(75,6,0,1,db_sine1x);
       delay(100);
-      key(75,-6,1,-db_sine1x);
+      key(75,-6,0,1,-db_sine1x);
       delay(10);
     }
     #endif
