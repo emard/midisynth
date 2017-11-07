@@ -39,9 +39,9 @@ const int C_tones_per_octave = 12; // tones per octave, MIDI standard
 const float C_cents_per_octave = 1200.0; // cents (tuning) per octave
 
 // Standard MIDI has equal temperament (100 cents each)
-// Real Hammond has tonewheels slightly off-tune due to its
-// mechanical construction (integer number of teeth <= 192).
-// BTW notes must be a little bit off-tune in order to sound correct :)
+// Hammond tried to make it, but tonewheels were slightly off-tune
+// because a wheel could have no more than 192 teeth.
+// Real notes must be a little bit off-tune in order to sound correct :)
 const float C_temperament[C_tones_per_octave] =
 { // Hammond temperament
          0.0,        //  0 C
@@ -65,8 +65,20 @@ const float C_base_freq = C_clk_freq*pow(2.0,C_temperament[C_ref_tone]/C_cents_p
 const float C_octave_to_ref = log(C_ref_freq/C_base_freq)/log(2.0);
 // convert real C_octave_to_ref into octave integer and cents tuning
 // now shift by (C_voice_addr_bits+C_pa_data_bits)
-const int C_shift_octave = (int)floor(C_octave_to_ref)+C_voice_addr_bits+C_pa_data_bits-C_ref_octave;
+const int C_shift_octave = (int)(floor(C_octave_to_ref))+C_voice_addr_bits+C_pa_data_bits-C_ref_octave;
 const float C_tuning_cents = C_cents_per_octave*(C_octave_to_ref-floor(C_octave_to_ref));
+// calculate tuned frequencies (phase advances per clock)
+void freq_init(int transpose)
+{
+  int i;
+  for(i = 0; i < (1 << C_voice_addr_bits); i++)
+  {
+    int octave = i / C_tones_per_octave;
+    int meantone = i % C_tones_per_octave;
+    *synth = (i - transpose) % (1 << C_voice_addr_bits);
+    *freq = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
+  }
+}
 
 uint64_t db_sine1x    = 0x800000000L; // key + 0
 uint64_t db_sine3x    = 0x080000000L; // key + 19
@@ -104,16 +116,6 @@ uint8_t drawbar_voice[9] = {0,19,12,24,31,36,40,43,48}; // voice offset for draw
 
 int key_volume = 1; // key volume 1-7
 
-// calculate tuned frequencies (phase advances per clock)
-void freq_init()
-{
-  int i;
-  for(i = 0; i < 128; i++)
-  {
-    *synth = i;
-    *freq = i*20000;
-  }
-}
 
 // key press: set of voice volumes according to the registration
 void key(uint8_t key, int16_t vol, uint8_t apply, uint64_t registration)
@@ -155,7 +157,6 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
       key(pitch, key_volume, 1, pitch < 60 ? reg_lower : reg_upper);
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
-      // digitalWrite(LED, HIGH);
     }
 }
 
@@ -166,7 +167,6 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
       key(pitch, -key_volume, 1, pitch < 60 ? reg_lower : reg_upper);
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
-      // digitalWrite(LED, LOW);
     }
 }
 
@@ -186,13 +186,25 @@ void setup()
     // Initiate MIDI communications, listen to all channels
     MIDI.begin(MIDI_CHANNEL_OMNI);
 
-    freq_init();
+    #if 1
+    *synth = 69 | (1000<<8);
+    *freq = 5000000;
+    delay(500);
+    *freq = 10000000;
+    delay(500);
+    *synth = 69;
+    #endif
+
+    freq_init(1);
     led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
+    #if 1
     key(69,7,1,db_sine1x);
     *led_indicator_pointer = 255;
     delay(500);
     *led_indicator_pointer = 0;
     key(69,-7,1,db_sine1x);
+    #endif
+    
 }
 
 void loop()
