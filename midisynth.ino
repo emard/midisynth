@@ -76,8 +76,10 @@ void freq_init(int transpose)
   {
     int octave = i / C_tones_per_octave;
     int meantone = i % C_tones_per_octave;
-    *voice = (i - transpose) % (1 << C_voice_addr_bits);
-    *pitch = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
+    int j = (i - transpose) % (1 << C_voice_addr_bits);
+    *voice = j;
+    freq[j] = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
+    *pitch = freq[j];
   }
 }
 
