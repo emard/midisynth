@@ -28,6 +28,8 @@ volatile uint32_t *voice = (uint32_t *)0xFFFFFBB0; // voices
 volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
 int16_t volume[128], target[128];
 uint32_t freq[128]; // freqency list
+const int pbm_shift = 22, pbm_range = 16384;
+uint32_t *pbm; // pitch bend multiplier 0..16383
 
 // constants for frequency table caculation
 const int C_clk_freq = 50000000; // Hz system clock
@@ -81,7 +83,13 @@ void freq_init(int transpose)
     freq[j] = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
     *pitch = freq[j];
   }
+  // pitch bend frequency multiplier
+  // bend range +-1 halftone (100 cents, 1/12 octave)
+  pbm = (uint32_t *)malloc(sizeof(uint32_t) * pbm_range);
+  for(i = 0; i < pbm_range; i++)
+    pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2)) + (float)pbm_shift)+0.5;
 }
+
 
 uint64_t db_sine1x    = 0x800000000L; // key + 0
 uint64_t db_sine3x    = 0x080000000L; // key + 19
@@ -120,8 +128,8 @@ uint8_t drawbar_voice[9] = {0,19,12,24,31,36,40,43,48}; // voice offset for draw
 int key_volume = 1; // key volume 1-7
 uint8_t last_pitch = 0; // last note played, for the pitch bend
 
-
 // key press: set of voice volumes according to the registration
+// bend: 0 no bend, -8192 down 1 octave, +8192 up 1 octave
 void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registration)
 {
   int i;
@@ -143,12 +151,20 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
       if(apply)
       {
        *voice = a | (volume[a] << 8);
-       *pitch = freq[a] + 10*bend;
+       if(bend == 0)
+         *pitch = freq[a];
+       else
+       {
+         int16_t pitchbend = bend + 8192;
+         if(bend < -8192) pitchbend = 0;
+         if(bend > 8191) pitchbend = 16383;
+         uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
+         *pitch = fbend;
+       }
       }
     }
   }
 }
-
 
 // -----------------------------------------------------------------------------
 
@@ -181,12 +197,6 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
 void handlePitchBend(byte channel, int bend)
 {
   key(last_pitch, 0, bend, 1, last_pitch < 60 ? reg_lower : reg_upper);
-  #if 0
-  bend_float = (float) bend;              // Convert bend (int) to float type to get also the after zero numbers
-  float bendfactor = (1+ bend_float/8190);      // Calculate the bend factor, with wich the tone() in [hz] shall be bended. Bendfactor shall be between 0.1 and 2, if no bending is applied --> 1.
-  if ((freq*bendfactor) > 50)                 // To prevent the output from beeing in an unstable state when note is not properly ended (e.g. not "OFF" has been send
-      tone(tonePin,freq*bendfactor);              // Write pitchbended tone to the output. E.g. bend: 8192: 440Hz * 2  --> 880hz --> one Octave higher
-  #endif
 }
 
 // -----------------------------------------------------------------------------
