@@ -28,7 +28,7 @@ volatile uint32_t *voice = (uint32_t *)0xFFFFFBB0; // voices
 volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
 int16_t volume[128], target[128];
 uint32_t freq[128]; // freqency list
-const int pbm_shift = 22, pbm_range = 16384;
+const int pbm_shift = 24, pbm_range = 16384, bend_halftones=2;
 uint32_t *pbm; // pitch bend multiplier 0..16383
 
 // constants for frequency table caculation
@@ -74,6 +74,17 @@ const float C_tuning_cents = C_cents_per_octave*(C_octave_to_ref-floor(C_octave_
 void freq_init(int transpose)
 {
   int i;
+  // pitch bend frequency multiplier
+  // bend range +-1 halftone (100 cents, 1/12 octave)
+  pbm = (uint32_t *)malloc(sizeof(uint32_t) * pbm_range);
+  // this calculation takes time so lets play some tone
+  for(i = 0; i < pbm_range; i++)
+  {
+    *voice = 69 | ((400+(i&127))<<8);
+    pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_halftones) + (float)pbm_shift)+0.5;
+    *pitch = 1600000 - ((pbm[i]<<6)&0xF0FF0);
+  }
+  *voice = 69;
   for(i = 0; i < (1 << C_voice_addr_bits); i++)
   {
     int octave = i / C_tones_per_octave;
@@ -83,11 +94,6 @@ void freq_init(int transpose)
     freq[j] = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
     *pitch = freq[j];
   }
-  // pitch bend frequency multiplier
-  // bend range +-1 halftone (100 cents, 1/12 octave)
-  pbm = (uint32_t *)malloc(sizeof(uint32_t) * pbm_range);
-  for(i = 0; i < pbm_range; i++)
-    pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2)) + (float)pbm_shift)+0.5;
 }
 
 
@@ -109,9 +115,11 @@ uint64_t db_childintime_upper = 0x784300000; // really 0x777000000 or vocalist i
 uint64_t db_childintime_lower = 0x745201000L;
 uint64_t db_starwars_upper = 0x811100000L;
 uint64_t db_starwars_lower = 0x800140000L;
+uint64_t db_civilwar_upper = 0x720000000;
+uint64_t db_civilwar_lower = 0x745201000L;
 
-uint64_t reg_upper = db_childintime_upper;
-uint64_t reg_lower = db_childintime_lower;
+uint64_t reg_upper = db_civilwar_upper;
+uint64_t reg_lower = db_civilwar_lower;
 
 //  0 keys - 1x frequency
 // 19 keys - 3x frequency
@@ -143,24 +151,26 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
     db_val = r & 15;
     r >>= 4;
     v = key+drawbar_voice[i];
-    if(v >= 0)
+    if(v >= 0 && db_val != 0)
     {
       a = v;
       db_volume = (1 << db_val)/2;
       volume[a] += vol * db_volume;
       if(apply)
       {
-       *voice = a | (volume[a] << 8);
-       if(bend == 0)
-         *pitch = freq[a];
-       else
-       {
-         int16_t pitchbend = bend + 8192;
-         if(bend < -8192) pitchbend = 0;
-         if(bend > 8191) pitchbend = 16383;
-         uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
-         *pitch = fbend;
-       }
+        *voice = a | (volume[a] << 8);
+        if(bend == 0)
+        {
+          *pitch = freq[a];
+        }
+        else
+        {
+          int16_t pitchbend = bend + 8192;
+          if(bend < -8192) pitchbend = 0;
+          if(bend > 8191) pitchbend = 16383;
+          uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
+          *pitch = fbend;
+        }
       }
     }
   }
