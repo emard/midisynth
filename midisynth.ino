@@ -13,6 +13,7 @@ __END_DECLS;
 // BaudRate = 115200
 // start bridge from alsa to midi serial
 // ttymidi -b 115200 -v -s /dev/ttyUSB0
+// composer: "musescore"
 // use "midish" to sequence MIDI songs
 // edit .midishrc and set target MIDI stream to ttymidi
 // dnew 0 "ttymidi:1" wo
@@ -40,6 +41,14 @@ uint32_t freq[128]; // freqency list
 const int pbm_shift = 24, pbm_range = 16384;
 uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
 uint32_t *pbm; // pitch bend multiplier 0..16383
+uint8_t active_parameter[2] = {127,127}; // MSB[1], LSB[0] of currently active parameter
+// see http://www.philrees.co.uk/nrpnq.htm
+// 0,0: pitch bend range
+// 0,1: fine tuning
+// 0,2: coarse tuning
+// 0,3: tuning program select
+// 0,4: tuning bank select
+// 127,127: cancel active parameter
 
 // constants for frequency table caculation
 const int C_clk_freq = 50000000; // Hz system clock
@@ -121,11 +130,11 @@ uint64_t db_rockorgan = 0x888000000L;
 uint64_t db_metalorgan= 0x875050000L;
 uint64_t db_brojack   = 0x800000888L;
 uint64_t db_vocalist  = 0x784300000L;
-uint64_t db_childintime_upper = 0x784300000; // really 0x777000000 or vocalist is better?
+uint64_t db_childintime_upper = 0x784300000L; // really 0x777000000 or vocalist is better?
 uint64_t db_childintime_lower = 0x745201000L;
 uint64_t db_starwars_upper = 0x811100000L;
 uint64_t db_starwars_lower = 0x800140000L;
-uint64_t db_civilwar_upper = 0x720000000;
+uint64_t db_civilwar_upper = 0x720000000L;
 uint64_t db_civilwar_lower = 0x745201000L;
 
 uint64_t reg_upper = db_starwars_upper;
@@ -221,21 +230,16 @@ void handlePitchBend(byte channel, int bend)
 
 void pitch_bend_range_change(byte channel, byte number, byte value)
 {
-  static int state = 0; // state tracker
-  switch(state)
+  switch(number) // controller number
   {
-    case 0:
-      if(number == 100 && value == 0)
-        state = 1;
+    case 100: // Registered Parameter LSB
+      active_parameter[0] = value;
       break;
-    case 1:
-      if(number == 101 && value == 0)
-        state = 2;
-      else
-        state = 0;
+    case 101: // Registered Parameter MSB
+      active_parameter[1] = value;
       break;
-    case 2:
-      if(number == 6)
+    case 6: // Data Entry MSB
+      if(active_parameter[1] == 0 && active_parameter[0] == 0)
       {
         // change pitch bend range, value in meantones
         if(value == 0)
@@ -245,18 +249,62 @@ void pitch_bend_range_change(byte channel, byte number, byte value)
         // attention - lengthy math, after changing bend_meantones,
         // the whole pitch bend table must be recalculated
         freq_init(0);
-        // state = 0;
-        // from MIDI behaviour description, it seems we should not reset state
-        // but rather accept subsequent change from controller 6
       }
-      else
-        state = 0;
+      break;
+    case 38: // Data Entry LSB
+      if(active_parameter[1] == 0 && active_parameter[0] == 0)
+      {
+        // optional, sets pitch bend range in cents
+        // not yet implemented setting pitch bend range in cents
+      }
+      break;
+  }
+}
+
+void drawbar_register_change(byte channel, byte number, byte value)
+{
+  uint8_t upper_drawbar_num, lower_drawbar_num;
+  uint64_t db_val = (value+8)/16; // convert value range 0-127 -> 0-8
+  uint8_t nshift; // number of bits to shift in drawbar register
+  uint64_t regmask;
+  // when registered parameters are disabled (127,127), drawbars will change
+  if(active_parameter[1] == 127 && active_parameter[0] == 127)
+  switch(number) // controller number
+  {
+    case 0: // 0-8: lower drawbar, sliders
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+      lower_drawbar_num = number;
+      nshift = 4*(8-lower_drawbar_num);
+      regmask = ~(0xF << nshift); // reset bits which will change
+      reg_lower = (reg_lower & regmask) | (db_val << nshift);
+      break;
+    case 16: // 16-23: upper drawbar turnknobs
+    case 17:
+    case 18:
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+    case 23:
+      upper_drawbar_num = number-16;
+      nshift = 4*(8-upper_drawbar_num);
+      regmask = ~(0xF << nshift); // resets bits which will change
+      reg_upper = (reg_upper & regmask) | (db_val << nshift);
+      break;
   }
 }
 
 void handleControlChange(byte channel, byte number, byte value)
 {
   pitch_bend_range_change(channel, number, value);
+  drawbar_register_change(channel, number, value);
 }
 
 // -----------------------------------------------------------------------------
@@ -326,8 +374,9 @@ void loop()
 
 /* TODO
 [x] support setting range of pitch bend (bend_meantones)
-[ ] make pitch bend change faster
-[ ] register changing with MIDI slider keyboard controls
+[ ] make pitch bend range change faster
+[x] register changing with MIDI slider keyboard controls
+[ ] when drawbars change, noteoff will not work (must recalculate all active notes)
 [ ] smooth register change (instead of 9-level ratcheted)
 [ ] reschedule voices
 */
