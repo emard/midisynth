@@ -8,6 +8,7 @@ int __cxa_atexit(void (_destructor) (void *), void *arg, void *dso) { return (0)
 __END_DECLS;
 #endif
 
+/*
 // FOR testing with usb-midi:
 // edit ~/Arduino/libraries/MIDI_Library/src/midi_Settings.h
 // BaudRate = 115200
@@ -26,6 +27,9 @@ __END_DECLS;
 // select "Midi Through:0" OK,
 // then select "ttymidi:1" OK
 // press vmpk keys and LED will turn on when a key is pressed
+// route events from USB drawbar slider to ttymidi
+// aconnect 24:0 128:1
+*/
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
@@ -137,8 +141,8 @@ uint64_t db_starwars_lower = 0x800140000L;
 uint64_t db_civilwar_upper = 0x720000000L;
 uint64_t db_civilwar_lower = 0x745201000L;
 
-uint64_t reg_upper = db_starwars_upper;
-uint64_t reg_lower = db_starwars_lower;
+uint64_t reg_upper = db_sine1x;
+uint64_t reg_lower = db_sine1x;
 
 //  0 keys - 1x frequency
 // 19 keys - 3x frequency
@@ -349,7 +353,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
     case 8:
       lower_drawbar_num = number;
       nshift = 4*(8-lower_drawbar_num);
-      regmask = ~(0xF << nshift); // reset bits which will change
+      regmask = ~(0xFLL << nshift); // reset bits which will change
       reg_lower = (reg_lower & regmask) | (db_val << nshift);
       voices_recalculate();
       break;
@@ -361,9 +365,10 @@ void drawbar_register_change(byte channel, byte number, byte value)
     case 21:
     case 22:
     case 23:
+    case 24:
       upper_drawbar_num = number-16;
       nshift = 4*(8-upper_drawbar_num);
-      regmask = ~(0xF << nshift); // resets bits which will change
+      regmask = ~(0xFLL << nshift); // resets bits which will change
       reg_upper = (reg_upper & regmask) | (db_val << nshift);
       voices_recalculate();
       break;
