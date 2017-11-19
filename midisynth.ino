@@ -161,14 +161,13 @@ uint8_t last_pitch = 0; // last note played, for the pitch bend
 
 const int C_voice_num = 1<<C_voice_addr_bits;
 
-int16_t active_keys[C_voice_num]; // tracks currently active keys
+int16_t active_keys[C_voice_num], active_bend[C_voice_num]; // tracks currently active keys and their bending
 
 // after any drawbar change, we need to recalculate all voices
 // currently being played by active keys
-#if 1
 void voices_recalculate()
 {
-  int i,key;
+  int i,j,key;
   uint8_t apply = 1;
   int16_t bend = 0; // no bending (todo: memorize bendings)
   uint64_t r;
@@ -177,14 +176,14 @@ void voices_recalculate()
   int8_t v; // voice number
   uint8_t a; // voice address
 
-  for(key = 0; key < C_voice_num; key++)
-    volume[key] = 0; // reset all volumes
+  for(j = 0; j < C_voice_num; j++)
+    volume[j] = 0; // initially zero all voice volumes
 
   for(key = 0; key < C_voice_num; key++) // loop thru all keys
   {
-    int16_t vol = active_keys[key];
-    r = key < 60 ? reg_lower : reg_upper;
-    if(vol != 0)
+    int16_t vol = active_keys[key]; // volume of current key
+    r = key < 60 ? reg_lower : reg_upper; // its register
+    if(vol > 0)
       for(i = drawbar_count-1; i >= 0; i--)
       {
         db_val = r & 15;
@@ -192,36 +191,40 @@ void voices_recalculate()
         v = key+drawbar_voice[i]; // in case of overflow >127, "v" becomes negative
         if(v >= 0 && db_val != 0) // if "v" is not negative means no overflow
         {
-          a = v;
           db_volume = (1 << db_val)/2;
-          volume[a] += vol * db_volume; // accumulate volumes
-          if(apply)
-          {
-            *voice = a | (volume[a] << 8);
-            if(bend == 0)
-            {
-              *pitch = freq[a];
-            }
-            else
-            {
-              int16_t pitchbend = bend + 8192;
-              if(bend < -8192) pitchbend = 0;
-              if(bend > 8191) pitchbend = 16383;
-              uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
-              *pitch = fbend;
-            }
-          }
+          volume[v] += vol * db_volume; // accumulate volumes
         }
       }
   }
+
+  if(apply)
+    for(a = 0; a < C_voice_num; a++)
+    {
+      bend = active_bend[a];
+      *voice = a | (volume[a] << 8);
+      if(bend == 0)
+      {
+        *pitch = freq[a];
+      }
+      else
+      {
+        int16_t pitchbend = bend + 8192;
+        if(bend < -8192) pitchbend = 0;
+        if(bend > 8191) pitchbend = 16383;
+        uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;
+        *pitch = fbend;
+      }
+    }
 }
-#endif
 
 void reset_keys()
 {
   int i;
   for(i = 0; i < C_voice_num; i++)
+  {
     active_keys[i] = 0;
+    active_bend[i] = 0;
+  }
 }
 
 // key press: set of voice volumes according to the registration
@@ -234,8 +237,7 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
   uint8_t db_val;
   int16_t db_volume;
   int8_t v; // voice number
-  uint8_t a; // voice address uint
-  active_keys[key & (C_voice_num-1)] += vol; // track keys to recalculate in case of drawbar change
+  active_keys[key] += vol; // track keys to recalculate in case of drawbar change
   for(i = drawbar_count-1; i >= 0; i--)
   {
     db_val = r & 15;
@@ -243,22 +245,21 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
     v = key+drawbar_voice[i]; // in case of overflow >127, "v" becomes negative
     if(v >= 0 && db_val != 0) // if "v" is not negative means no overflow
     {
-      a = v;
       db_volume = (1 << db_val)/2;
-      volume[a] += vol * db_volume;
-      if(apply)
+      volume[v] += vol * db_volume;
+      if(apply != 0)
       {
-        *voice = a | (volume[a] << 8);
+        *voice = v | (volume[v] << 8);
         if(bend == 0)
         {
-          *pitch = freq[a];
+          *pitch = freq[v];
         }
         else
         {
           int16_t pitchbend = bend + 8192;
           if(bend < -8192) pitchbend = 0;
           if(bend > 8191) pitchbend = 16383;
-          uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
+          uint64_t fbend = ((uint64_t)(freq[v]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
           *pitch = fbend;
         }
       }
@@ -278,6 +279,7 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     //if(channel == 1)
     {
       key(pitch, key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
+      active_bend[pitch] = 0;
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
       last_pitch = pitch; // for pitch bend
@@ -289,6 +291,8 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
     //if(channel == 1)
     {
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
+      active_bend[pitch] = 0;
+      //voices_recalculate();
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
@@ -297,6 +301,7 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
 void handlePitchBend(byte channel, int bend)
 {
   key(last_pitch, 0, bend, 1, last_pitch < 60 ? reg_lower : reg_upper);
+  active_bend[last_pitch] = bend;
 }
 
 void pitch_bend_range_change(byte channel, byte number, byte value)
@@ -338,6 +343,10 @@ void drawbar_register_change(byte channel, byte number, byte value)
   uint64_t db_val = (value+8)/16; // convert value range 0-127 -> 0-8
   uint8_t nshift; // number of bits to shift in drawbar register
   uint64_t regmask;
+  #if 1
+  if(channel > 127) // only channel 0 should carry drawbar change
+    return; // but seems drawbar change channel is not 0???
+  #endif
   // when registered parameters are disabled (127,127), drawbars will change
   if(active_parameter[1] == 127 && active_parameter[0] == 127)
   switch(number) // controller number
@@ -368,7 +377,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
     case 24:
       upper_drawbar_num = number-16;
       nshift = 4*(8-upper_drawbar_num);
-      regmask = ~(0xFULL << nshift); // resets bits which will change
+      regmask = ~(0xFULL << nshift); // reset bits which will change
       reg_upper = (reg_upper & regmask) | (db_val << nshift);
       voices_recalculate();
       break;
