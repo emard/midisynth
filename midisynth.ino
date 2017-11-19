@@ -1,16 +1,24 @@
 #include <MIDI.h>
 
 // drty workaround to get MIDI compiling
+#if 0
 void* __dso_handle = (void*) &__dso_handle;
 __BEGIN_DECLS
 int __cxa_atexit(void (_destructor) (void *), void *arg, void *dso) { return (0);}
 __END_DECLS;
+#endif
 
 // FOR testing with usb-midi:
 // edit ~/Arduino/libraries/MIDI_Library/src/midi_Settings.h
 // BaudRate = 115200
 // start bridge from alsa to midi serial
 // ttymidi -b 115200 -v -s /dev/ttyUSB0
+// midish to sequence MIDI songs
+// edit .midishrc
+// dnew 0 "ttymidi:1" wo
+// run midish at its prompt load MIDI file and play:
+// import "ChildInTime.mid"
+// p
 // on vmpk soft-MIDI keyboard,
 // Edit->Connections->Output MIDI connection:
 // select "Midi Through:0" OK,
@@ -28,7 +36,7 @@ volatile uint32_t *voice = (uint32_t *)0xFFFFFBB0; // voices
 volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
 int16_t volume[128], target[128];
 uint32_t freq[128]; // freqency list
-const int pbm_shift = 24, pbm_range = 16384, bend_halftones=2;
+const int pbm_shift = 24, pbm_range = 16384, bend_meantones=2;
 uint32_t *pbm; // pitch bend multiplier 0..16383
 
 // constants for frequency table caculation
@@ -81,7 +89,7 @@ void freq_init(int transpose)
   for(i = 0; i < pbm_range; i++)
   {
     *voice = 69 | ((400+(i&127))<<8);
-    pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_halftones) + (float)pbm_shift)+0.5;
+    pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_meantones) + (float)pbm_shift)+0.5;
     *pitch = 1600000 - ((pbm[i]<<6)&0xF0FF0);
   }
   *voice = 69;
@@ -271,3 +279,6 @@ void loop()
     // when the corresponding message has been received.
 }
 
+/* TODO: support setting range of pitch bend (bend_meantones)
+ * 
+ */
