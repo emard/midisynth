@@ -13,13 +13,14 @@ __END_DECLS;
 // BaudRate = 115200
 // start bridge from alsa to midi serial
 // ttymidi -b 115200 -v -s /dev/ttyUSB0
-// midish to sequence MIDI songs
-// edit .midishrc
+// use "midish" to sequence MIDI songs
+// edit .midishrc and set target MIDI stream to ttymidi
 // dnew 0 "ttymidi:1" wo
-// run midish at its prompt load MIDI file and play:
+// run midish. At its prompt load MIDI file and play:
 // import "ChildInTime.mid"
 // p
-// on vmpk soft-MIDI keyboard,
+// keyboard playing:
+// vmpk is soft-MIDI keyboard,
 // Edit->Connections->Output MIDI connection:
 // select "Midi Through:0" OK,
 // then select "ttymidi:1" OK
