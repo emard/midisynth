@@ -173,11 +173,14 @@ void voices_recalculate()
   int8_t v; // voice number
   uint8_t a; // voice address
 
+  for(key = 0; key < C_voice_num; key++)
+    volume[key] = 0; // reset all volumes
+
   for(key = 0; key < C_voice_num; key++) // loop thru all keys
   {
     int16_t vol = active_keys[key];
     r = key < 60 ? reg_lower : reg_upper;
-    if(vol > 0)
+    if(vol != 0)
       for(i = drawbar_count-1; i >= 0; i--)
       {
         db_val = r & 15;
@@ -187,7 +190,7 @@ void voices_recalculate()
         {
           a = v;
           db_volume = (1 << db_val)/2;
-          volume[a] = vol * db_volume;
+          volume[a] += vol * db_volume; // accumulate volumes
           if(apply)
           {
             *voice = a | (volume[a] << 8);
@@ -206,11 +209,16 @@ void voices_recalculate()
           }
         }
       }
-
   }
-  
 }
 #endif
+
+void reset_keys()
+{
+  int i;
+  for(i = 0; i < C_voice_num; i++)
+    active_keys[i] = 0;
+}
 
 // key press: set of voice volumes according to the registration
 // bend: 0 no bend, -8192 down 1 octave, +8192 up 1 octave
@@ -274,13 +282,9 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 
 void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
-  static uint8_t recalc;
-  recalc++;
     //if(channel == 1)
     {
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
-      //if(recalc == 0)
-      //  voices_recalculate();
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
@@ -403,6 +407,7 @@ void setup()
     *voice = 69;
     #endif
 
+    reset_keys();
     freq_init(0);
     led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
     #if 1
