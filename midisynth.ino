@@ -1,7 +1,7 @@
 #include <MIDI.h>
 
-// drty workaround to get MIDI compiling
 #if 0
+// drty workaround to get MIDI compiling
 void* __dso_handle = (void*) &__dso_handle;
 __BEGIN_DECLS
 int __cxa_atexit(void (_destructor) (void *), void *arg, void *dso) { return (0);}
@@ -36,7 +36,8 @@ volatile uint32_t *voice = (uint32_t *)0xFFFFFBB0; // voices
 volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
 int16_t volume[128], target[128];
 uint32_t freq[128]; // freqency list
-const int pbm_shift = 24, pbm_range = 16384, bend_meantones=2;
+const int pbm_shift = 24, pbm_range = 16384;
+uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
 uint32_t *pbm; // pitch bend multiplier 0..16383
 
 // constants for frequency table caculation
@@ -126,8 +127,8 @@ uint64_t db_starwars_lower = 0x800140000L;
 uint64_t db_civilwar_upper = 0x720000000;
 uint64_t db_civilwar_lower = 0x745201000L;
 
-uint64_t reg_upper = db_civilwar_upper;
-uint64_t reg_lower = db_civilwar_lower;
+uint64_t reg_upper = db_starwars_upper;
+uint64_t reg_lower = db_starwars_lower;
 
 //  0 keys - 1x frequency
 // 19 keys - 3x frequency
@@ -217,6 +218,46 @@ void handlePitchBend(byte channel, int bend)
   key(last_pitch, 0, bend, 1, last_pitch < 60 ? reg_lower : reg_upper);
 }
 
+void pitch_bend_range_change(byte channel, byte number, byte value)
+{
+  static int state = 0; // state tracker
+  switch(state)
+  {
+    case 0:
+      if(number == 100 && value == 0)
+        state = 1;
+      break;
+    case 1:
+      if(number == 101 && value == 0)
+        state = 2;
+      else
+        state = 0;
+      break;
+    case 2:
+      if(number == 6)
+      {
+        // change pitch bend range, value in meantones
+        if(value == 0)
+          bend_meantones = 2; // 0 is the same as 2
+        else
+          bend_meantones = value;
+        // attention - lengthy math, after changing bend_meantones,
+        // the whole pitch bend table must be recalculated
+        freq_init(0);
+        // state = 0;
+        // from MIDI behaviour description, it seems we should not reset state
+        // but rather accept subsequent change from controller 6
+      }
+      else
+        state = 0;
+  }
+}
+
+void handleControlChange(byte channel, byte number, byte value)
+{
+  pitch_bend_range_change(channel, number, value);
+}
+
 // -----------------------------------------------------------------------------
 
 void setup()
@@ -232,6 +273,9 @@ void setup()
 
     // Handle the Pitch Bend
     MIDI.setHandlePitchBend(handlePitchBend);
+
+    // Handle Control Change (may change pitch bend range)
+    MIDI.setHandleControlChange(handleControlChange);
 
     // Initiate MIDI communications, listen to all channels
     MIDI.begin(MIDI_CHANNEL_OMNI);
@@ -279,6 +323,11 @@ void loop()
     // when the corresponding message has been received.
 }
 
-/* TODO: support setting range of pitch bend (bend_meantones)
- * 
- */
+/* TODO
+[x] support setting range of pitch bend (bend_meantones)
+[ ] make pitch bend change faster
+[ ] register changing with MIDI slider keyboard controls
+[ ] smooth register change (instead of 9-level ratcheted)
+[ ] reschedule voices
+*/
+
