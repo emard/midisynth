@@ -353,7 +353,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
     case 8:
       lower_drawbar_num = number;
       nshift = 4*(8-lower_drawbar_num);
-      regmask = ~(0xFLL << nshift); // reset bits which will change
+      regmask = ~(0xFULL << nshift); // reset bits which will change
       reg_lower = (reg_lower & regmask) | (db_val << nshift);
       voices_recalculate();
       break;
@@ -368,7 +368,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
     case 24:
       upper_drawbar_num = number-16;
       nshift = 4*(8-upper_drawbar_num);
-      regmask = ~(0xFLL << nshift); // resets bits which will change
+      regmask = ~(0xFULL << nshift); // resets bits which will change
       reg_upper = (reg_upper & regmask) | (db_val << nshift);
       voices_recalculate();
       break;
