@@ -155,8 +155,66 @@ uint8_t drawbar_voice[9] = {0,19,12,24,31,36,40,43,48}; // voice offset for draw
 int key_volume = 1; // key volume 1-7
 uint8_t last_pitch = 0; // last note played, for the pitch bend
 
+const int C_voice_num = 1<<C_voice_addr_bits;
+
+int16_t active_keys[C_voice_num]; // tracks currently active keys
+
+// after any drawbar change, we need to recalculate all voices
+// currently being played by active keys
+#if 1
+void voices_recalculate()
+{
+  int i,key;
+  uint8_t apply = 1;
+  int16_t bend = 0; // no bending (todo: memorize bendings)
+  uint64_t r;
+  uint8_t db_val;
+  int16_t db_volume;
+  int8_t v; // voice number
+  uint8_t a; // voice address
+
+  for(key = 0; key < C_voice_num; key++) // loop thru all keys
+  {
+    int16_t vol = active_keys[key];
+    r = key < 60 ? reg_lower : reg_upper;
+    if(vol > 0)
+      for(i = drawbar_count-1; i >= 0; i--)
+      {
+        db_val = r & 15;
+        r >>= 4;
+        v = key+drawbar_voice[i]; // in case of overflow >127, "v" becomes negative
+        if(v >= 0 && db_val != 0) // if "v" is not negative means no overflow
+        {
+          a = v;
+          db_volume = (1 << db_val)/2;
+          volume[a] = vol * db_volume;
+          if(apply)
+          {
+            *voice = a | (volume[a] << 8);
+            if(bend == 0)
+            {
+              *pitch = freq[a];
+            }
+            else
+            {
+              int16_t pitchbend = bend + 8192;
+              if(bend < -8192) pitchbend = 0;
+              if(bend > 8191) pitchbend = 16383;
+              uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
+              *pitch = fbend;
+            }
+          }
+        }
+      }
+
+  }
+  
+}
+#endif
+
 // key press: set of voice volumes according to the registration
 // bend: 0 no bend, -8192 down 1 octave, +8192 up 1 octave
+// bending range can be changed by control command
 void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registration)
 {
   int i;
@@ -165,12 +223,13 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
   int16_t db_volume;
   int8_t v; // voice number
   uint8_t a; // voice address uint
+  active_keys[key & (C_voice_num-1)] += vol; // track keys to recalculate in case of drawbar change
   for(i = drawbar_count-1; i >= 0; i--)
   {
     db_val = r & 15;
     r >>= 4;
-    v = key+drawbar_voice[i];
-    if(v >= 0 && db_val != 0)
+    v = key+drawbar_voice[i]; // in case of overflow >127, "v" becomes negative
+    if(v >= 0 && db_val != 0) // if "v" is not negative means no overflow
     {
       a = v;
       db_volume = (1 << db_val)/2;
@@ -215,9 +274,13 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 
 void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
+  static uint8_t recalc;
+  recalc++;
     //if(channel == 1)
     {
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
+      //if(recalc == 0)
+      //  voices_recalculate();
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
@@ -284,6 +347,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
       nshift = 4*(8-lower_drawbar_num);
       regmask = ~(0xF << nshift); // reset bits which will change
       reg_lower = (reg_lower & regmask) | (db_val << nshift);
+      voices_recalculate();
       break;
     case 16: // 16-23: upper drawbar turnknobs
     case 17:
@@ -297,6 +361,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
       nshift = 4*(8-upper_drawbar_num);
       regmask = ~(0xF << nshift); // resets bits which will change
       reg_upper = (reg_upper & regmask) | (db_val << nshift);
+      voices_recalculate();
       break;
   }
 }
