@@ -237,7 +237,6 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
   uint8_t db_val;
   int16_t db_volume;
   int8_t v; // voice number
-  active_keys[key] += vol; // track keys to recalculate in case of drawbar change
   for(i = drawbar_count-1; i >= 0; i--)
   {
     db_val = r & 15;
@@ -279,6 +278,7 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     //if(channel == 1)
     {
       key(pitch, key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
+      active_keys[pitch] = key_volume;
       active_bend[pitch] = 0;
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
@@ -288,11 +288,15 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 
 void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
+  static uint8_t recalc;
+  recalc++;
     //if(channel == 1)
     {
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
+      active_keys[pitch] = 0;
       active_bend[pitch] = 0;
-      //voices_recalculate();
+      if(recalc == 0)
+        voices_recalculate();
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
@@ -344,7 +348,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
   uint8_t nshift; // number of bits to shift in drawbar register
   uint64_t regmask;
   #if 1
-  if(channel > 127) // only channel 0 should carry drawbar change
+  if(channel != 1) // only channel 0 should carry drawbar change
     return; // but seems drawbar change channel is not 0???
   #endif
   // when registered parameters are disabled (127,127), drawbars will change
