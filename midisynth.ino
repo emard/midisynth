@@ -221,6 +221,7 @@ void voices_volume_recalculate_background()
   *voice = i | (voice_vol << 8);
 }
 
+// will mute everything and stop any stuck key
 void reset_keys()
 {
   int i;
@@ -228,6 +229,8 @@ void reset_keys()
   {
     active_keys[i] = 0;
     active_bend[i] = 0;
+    volume[i] = 0;
+    *voice = i;
   }
 }
 
@@ -277,11 +280,11 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
   recalc++;
     //if(channel == 1)
     {
-      #if 0
+      #if 1
       if(active_keys[pitch] <= 0)
       {
         active_keys[pitch] = 0;
-        return; // key is already off
+        return; // nothing to do, key is already off
       }
       #endif
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
@@ -411,11 +414,25 @@ void drawbar_register_change(byte channel, byte number, byte value)
   }
 }
 
+void emergency_reset_keys_control(byte channel, byte number, byte value)
+{
+  static uint8_t old_reset = 0;
+  switch(number) // controller number
+  {
+    case 43: // button to reset all notes in case they got stuck
+      if(value == 127 && old_reset == 0)
+        reset_keys();
+      old_reset = value;
+      break;
+  }
+}
+
 void handleControlChange(byte channel, byte number, byte value)
 {
   #if 1
   pitch_bend_range_change(channel, number, value);
   drawbar_register_change(channel, number, value);
+  emergency_reset_keys_control(channel, number, value);
   #endif
 }
 
