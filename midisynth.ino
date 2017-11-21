@@ -157,7 +157,7 @@ void freq_init(int transpose)
 // float math takes cca 20 seconds to fully recalculate
 void pitch_bend_background(void)
 {
-  static int16_t i = 0; // the running counter
+  static int16_t i = -1; // the running counter
   // on each invocation, this will process one table entry from 16384
   if(request_new_pitch_bend_range != 0)
   {
@@ -178,9 +178,7 @@ void pitch_bend_background(void)
 // or after each change of drawbar settings
 void voices_volume_recalculate_background()
 {
-  static int16_t i; // running voice num counter if positive we are recalculating 
-  int16_t j; // drawbar counter
-  int16_t voice_vol;
+  static int16_t i = -1; // running voice num counter if positive we are recalculating 
   if(request_voices_volume_recalculate != 0)
   {
     i = C_voice_num;
@@ -190,21 +188,28 @@ void voices_volume_recalculate_background()
     return;
   i--; // decrement
   // for voice i, accumulate key volumes thru all relevant drawbars
-  voice_vol = 0;
+  int32_t voice_vol = 0;
+  int16_t j; // drawbar counter
   for(j = 0; j < drawbar_count; j++)
   {
-    int key_num = i - drawbar_voice[j];
-    if(key_num >= 0)
+    int key_num = i - drawbar_voice[j]; // some lower pitch key may contribute to this voice
+    if(key_num >= 0 && key_num <= 127)
     {
-      int key_vol = active_keys[key_num];
-      // drawbar registration setting for this key
-      uint64_t r = key_num < 60 ? reg_lower : reg_upper;
-      // downshift drawbar value to position at bit 0
-      r >>= 4*(drawbar_count-1-j);
-      // delete all upper bits to get individual drawbar value
-      uint8_t db_val = r & 0xF;
-      uint16_t db_volume = (1 << db_val)/2; // 2^n function to linear volume
-      voice_vol += key_vol * db_volume; // multiply with key value
+      int16_t key_vol = active_keys[key_num]; // volume contribution of the key
+      if(key_vol)
+      {
+        // determine drawbar value for this key
+        uint64_t r = key_num < 60 ? reg_lower : reg_upper;
+        // downshift drawbar value to position at bit 0
+        r >>= 4*(drawbar_count-1-j);
+        // delete all upper bits to get individual drawbar value
+        uint8_t db_val = r & 0xF;
+        if(db_val)
+        {
+          int16_t db_volume = (1 << db_val)/2; // 2^n function to linear volume
+          voice_vol += key_vol * db_volume; // multiply with key value
+        }
+      }
     }
   }
   volume[i] = voice_vol;
@@ -273,7 +278,7 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     //if(channel == 1)
     {
       key(pitch, key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
-      active_keys[pitch] = key_volume;
+      active_keys[pitch] += key_volume;
       active_bend[pitch] = 0;
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
@@ -288,10 +293,12 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
     //if(channel == 1)
     {
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
-      active_keys[pitch] = 0;
+      active_keys[pitch] -= key_volume;
       active_bend[pitch] = 0;
+      #if 1
       if(recalc == 0) // every 256 request recalculation of all voices
         request_voices_volume_recalculate = 1;
+      #endif
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
@@ -459,6 +466,7 @@ void loop()
     // The attached method will be called automatically
     // when the corresponding message has been received.
     pitch_bend_background();
+    voices_volume_recalculate_background();
 }
 
 /* TODO
