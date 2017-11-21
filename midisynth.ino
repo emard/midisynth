@@ -116,8 +116,8 @@ uint64_t db_starwars_lower = 0x800140000L;
 uint64_t db_civilwar_upper = 0x720000000L;
 uint64_t db_civilwar_lower = 0x745201000L;
 
-uint64_t reg_upper = db_sine1x;
-uint64_t reg_lower = db_sine1x;
+uint64_t reg_upper = db_childintime_upper;
+uint64_t reg_lower = db_childintime_lower;
 
 //  0 keys - 1x frequency
 // 19 keys - 3x frequency
@@ -129,7 +129,7 @@ uint64_t reg_lower = db_sine1x;
 // 43 keys - 12x frequency
 // 48 keys - 16x frequency
 const int drawbar_count = 9;
-uint8_t drawbar_voice[9] = {0,19,12,24,31,36,40,43,48}; // voice offset for drawbars
+int8_t drawbar_voice[9] = {0,19,12,24,31,36,40,43,48}; // voice offset for drawbars
 
 int key_volume = 1; // key volume 1-7
 uint8_t last_pitch = 0; // last note played, for the pitch bend
@@ -170,7 +170,9 @@ void pitch_bend_background(void)
   // pitch bend frequency multiplier
   // default bend range is +-1 halftone (100 cents, 1/12 octave)
   // this calculation takes time so it's backgrounded
+  // (but it's still too slow so serial port looses bytes)
   pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_meantones) + (float)pbm_shift)+0.5;
+  // delay(1); // not even 1 ms delay is tolerated here
 }
 
 // this will background-refresh each voice volume
@@ -185,7 +187,9 @@ void voices_volume_recalculate_background()
     request_voices_volume_recalculate = 0; // clear request flag
   }
   if(i <= 0) // we're done
+  {
     return;
+  }
   i--; // decrement
   // for voice i, accumulate key volumes thru all relevant drawbars
   int32_t voice_vol = 0;
@@ -267,6 +271,30 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
 }
 
 // -----------------------------------------------------------------------------
+void handleNoteOff(byte channel, byte pitch, byte velocity)
+{
+  static uint8_t recalc = 0;
+  recalc++;
+    //if(channel == 1)
+    {
+      #if 0
+      if(active_keys[pitch] <= 0)
+      {
+        active_keys[pitch] = 0;
+        return; // key is already off
+      }
+      #endif
+      key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
+      active_keys[pitch] -= key_volume;
+      active_bend[pitch] = 0;
+      #if 0
+      if((recalc & 15) == 0) // every 16 notes request recalculation of all voices
+        request_voices_volume_recalculate = 1;
+      #endif
+      led_value ^= pitch;
+      *led_indicator_pointer = led_value;
+    }
+}
 
 // This function will be automatically called when a NoteOn is received.
 // It must be a void-returning function with the correct parameters,
@@ -277,6 +305,16 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 {
     //if(channel == 1)
     {
+      if(velocity == 0)
+      {
+        // 0-velocity is the same as note off
+        handleNoteOff(channel, pitch, velocity);
+        return;
+      }
+      #if 0
+      if(active_keys[pitch] > 0)
+        return; // key already pressed
+      #endif
       key(pitch, key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
       active_keys[pitch] += key_volume;
       active_bend[pitch] = 0;
@@ -286,23 +324,6 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     }
 }
 
-void handleNoteOff(byte channel, byte pitch, byte velocity)
-{
-  static uint8_t recalc;
-  recalc++;
-    //if(channel == 1)
-    {
-      key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
-      active_keys[pitch] -= key_volume;
-      active_bend[pitch] = 0;
-      #if 1
-      if(recalc == 0) // every 256 request recalculation of all voices
-        request_voices_volume_recalculate = 1;
-      #endif
-      led_value ^= pitch;
-      *led_indicator_pointer = led_value;
-    }
-}
 
 void handlePitchBend(byte channel, int bend)
 {
@@ -392,37 +413,21 @@ void drawbar_register_change(byte channel, byte number, byte value)
 
 void handleControlChange(byte channel, byte number, byte value)
 {
+  #if 1
   pitch_bend_range_change(channel, number, value);
   drawbar_register_change(channel, number, value);
+  #endif
 }
 
 // -----------------------------------------------------------------------------
 
 void setup()
 {
-    // F32C specific by default is disabled but just in case...
-    // Serial.setXoffXon(FALSE);
-    // Connect the handleNoteOn function to the library,
-    // so it is called upon reception of a NoteOn.
-    MIDI.setHandleNoteOn(handleNoteOn);  // Put only the name of the function
-
-    // Do the same for NoteOffs
-    MIDI.setHandleNoteOff(handleNoteOff);
-
-    // Handle the Pitch Bend
-    MIDI.setHandlePitchBend(handlePitchBend);
-
-    // Handle Control Change (may change pitch bend range)
-    MIDI.setHandleControlChange(handleControlChange);
-
-    // Initiate MIDI communications, listen to all channels
-    MIDI.begin(MIDI_CHANNEL_OMNI);
-
     // allocate table for pitch bend change
     pbm = (uint32_t *)malloc(sizeof(uint32_t) * pbm_range);
     int i;
     for(i = 0; i < pbm_range; i++)
-      pbm[i] = 1 << pbm_shift; // neutral intial value
+      pbm[i] = 1 << pbm_shift; // neutral intial value (multiply by 1)
 
     #if 0
     *voice = 69 | (1000<<8);
@@ -455,6 +460,25 @@ void setup()
       delay(10);
     }
     #endif
+
+    // F32C specific by default is disabled but just in case...
+    // Serial.setXoffXon(FALSE);
+    // Connect the handleNoteOn function to the library,
+    // so it is called upon reception of a NoteOn.
+    MIDI.setHandleNoteOn(handleNoteOn);  // Put only the name of the function
+
+    // Do the same for NoteOffs
+    MIDI.setHandleNoteOff(handleNoteOff);
+
+    // Handle the Pitch Bend
+    MIDI.setHandlePitchBend(handlePitchBend);
+
+    // Handle Control Change (may change pitch bend range)
+    MIDI.setHandleControlChange(handleControlChange);
+
+    // Initiate MIDI communications, listen to all channels
+    MIDI.begin(MIDI_CHANNEL_OMNI);
+
 }
 
 void loop()
