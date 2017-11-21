@@ -41,6 +41,7 @@ volatile uint32_t *led_indicator_pointer; // address of LED MMIO register
 volatile uint32_t *voice = (uint32_t *)0xFFFFFBB0; // voices
 volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
 int16_t volume[128], target[128];
+uint8_t request_voices_volume_recalculate = 0;
 uint32_t freq[128]; // freqency list
 const int pbm_shift = 24, pbm_range = 16384;
 uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
@@ -172,11 +173,51 @@ void pitch_bend_background(void)
   pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_meantones) + (float)pbm_shift)+0.5;
 }
 
+// this will background-refresh each voice volume
+// setting, in case of some intermediate miscalculation
+// or after drawbar settings change 
+void voices_volume_recalculate_background()
+{
+  static int16_t i; // running voice num counter if positive we are recalculating 
+  int16_t j; // drawbar counter
+  int16_t voice_vol;
+  if(request_voices_volume_recalculate != 0)
+  {
+    i = C_voice_num;
+    request_voices_volume_recalculate = 0; // clear request flag
+  }
+  if(i <= 0) // we're done
+    return;
+  i--; // decrement
+  // for voice i, accumulate key volumes thru all relevant drawbars
+  voice_vol = 0;
+  for(j = 0; j < drawbar_count; j++)
+  {
+    int key_num = i - drawbar_voice[j];
+    if(key_num >= 0)
+    {
+      int key_vol = active_keys[key_num];
+      // drawbar registration setting for this key
+      uint64_t r = key_num < 60 ? reg_lower : reg_upper;
+      // downshift drawbar value to position at bit 0
+      r >>= 4*j;
+      // delete all upper bits to get individual drawbar value
+      uint8_t db_val = r & 0xF;
+      uint16_t db_volume = (1 << db_val)/2; // 2^n function to linear volume
+      voice_vol += key_vol * db_volume; // multiply with key value
+    }
+  }
+  volume[i] = voice_vol;
+  // apply recalculated volume to synth voice volume register
+  *voice = i | (voice_vol << 8);
+}
 
 // after any drawbar change, we need to recalculate all voices
 // currently being played by active keys
 // but this takes time so (TODO) it should be backgrounded
 // to recalculate one voice at a time
+// for each voice, loop thru all drawbar setting, read the key value
+// that may affect this voice
 void voices_recalculate()
 {
   int i,j,key;
@@ -300,15 +341,15 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 
 void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
-  //static uint8_t recalc;
-  //recalc++;
+  static uint8_t recalc;
+  recalc++;
     //if(channel == 1)
     {
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
       active_keys[pitch] = 0;
       active_bend[pitch] = 0;
-      //if(recalc == 0)
-      //  voices_recalculate();
+      if(recalc == 0)
+        voices_recalculate();
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
@@ -380,7 +421,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
       nshift = 4*(8-lower_drawbar_num);
       regmask = ~(0xFULL << nshift); // reset bits which will change
       reg_lower = (reg_lower & regmask) | (db_val << nshift);
-      // voices_recalculate();
+      request_voices_volume_recalculate = 1;
       break;
     case 16: // 16-23: upper drawbar turnknobs
     case 17:
@@ -395,7 +436,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
       nshift = 4*(8-upper_drawbar_num);
       regmask = ~(0xFULL << nshift); // reset bits which will change
       reg_upper = (reg_upper & regmask) | (db_val << nshift);
-      // voices_recalculate();
+      request_voices_volume_recalculate = 1;
       break;
   }
 }
