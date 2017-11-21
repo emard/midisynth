@@ -1,19 +1,11 @@
 #include <MIDI.h>
 
-#if 0
-// drty workaround to get MIDI compiling
-void* __dso_handle = (void*) &__dso_handle;
-__BEGIN_DECLS
-int __cxa_atexit(void (_destructor) (void *), void *arg, void *dso) { return (0);}
-__END_DECLS;
-#endif
-
 /*
 // FOR testing with usb-midi:
 // edit ~/Arduino/libraries/MIDI_Library/src/midi_Settings.h
-// BaudRate = 115200
+// BaudRate = 38400
 // start bridge from alsa to midi serial
-// ttymidi -b 115200 -v -s /dev/ttyUSB0
+// ttymidi -b 38400 -v -s /dev/ttyUSB0
 // composer: "musescore"
 // use "midish" to sequence MIDI songs
 // edit .midishrc and set target MIDI stream to ttymidi
@@ -47,6 +39,7 @@ const int pbm_shift = 24, pbm_range = 16384;
 uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
 uint32_t *pbm; // pitch bend multiplier 0..16383
 uint8_t request_new_pitch_bend_range = 1; // request recalculation of pitch bend range
+
 uint8_t active_parameter[2] = {127,127}; // MSB[1], LSB[0] of currently active parameter
 // see http://www.philrees.co.uk/nrpnq.htm
 // 0,0: pitch bend range
@@ -274,6 +267,13 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
 }
 
 // -----------------------------------------------------------------------------
+// callback functions will be automatically called when a NoteOn, NoteOff,
+// PitchBend or Control message is received.
+// It must be a void-returning function with the correct parameters,
+// see documentation here:
+// http://arduinomidilib.fortyseveneffects.com/a00022.html
+
+
 void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
   static uint8_t recalc = 0;
@@ -299,11 +299,6 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
     }
 }
 
-// This function will be automatically called when a NoteOn is received.
-// It must be a void-returning function with the correct parameters,
-// see documentation here:
-// http://arduinomidilib.fortyseveneffects.com/a00022.html
-
 void handleNoteOn(byte channel, byte pitch, byte velocity)
 {
     //if(channel == 1)
@@ -326,7 +321,6 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
       last_pitch = pitch; // for pitch bend
     }
 }
-
 
 void handlePitchBend(byte channel, int bend)
 {
@@ -374,8 +368,8 @@ void drawbar_register_change(byte channel, byte number, byte value)
   uint8_t nshift; // number of bits to shift in drawbar register
   uint64_t regmask;
   #if 1
-  if(channel != 1) // only channel 0 should carry drawbar change
-    return; // but seems drawbar change channel is not 0???
+  if(channel != 1) // only channel 1 should carry drawbar change
+    return;
   #endif
   // when registered parameters are disabled (127,127), drawbars will change
   if(active_parameter[1] == 127 && active_parameter[0] == 127)
@@ -419,7 +413,7 @@ void emergency_reset_keys_control(byte channel, byte number, byte value)
   static uint8_t old_reset = 0;
   switch(number) // controller number
   {
-    case 43: // button to reset all notes in case they got stuck
+    case 43: // lower left key (rewind button) resets all notes (in case they got stuck)
       if(value == 127 && old_reset == 0)
         reset_keys();
       old_reset = value;
@@ -458,6 +452,7 @@ void setup()
     reset_keys();
     freq_init(0);
     led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
+
     #if 1
     key(69,7,0,1,db_sine1x);
     *led_indicator_pointer = 255;
