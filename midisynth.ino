@@ -45,6 +45,7 @@ uint32_t freq[128]; // freqency list
 const int pbm_shift = 24, pbm_range = 16384;
 uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
 uint32_t *pbm; // pitch bend multiplier 0..16383
+uint8_t request_new_pitch_bend_range = 1; // request recalculation of pitch bend range
 uint8_t active_parameter[2] = {127,127}; // MSB[1], LSB[0] of currently active parameter
 // see http://www.philrees.co.uk/nrpnq.htm
 // 0,0: pitch bend range
@@ -93,33 +94,6 @@ const float C_octave_to_ref = log(C_ref_freq/C_base_freq)/log(2.0);
 // now shift by (C_voice_addr_bits+C_pa_data_bits)
 const int C_shift_octave = (int)(floor(C_octave_to_ref))+C_voice_addr_bits+C_pa_data_bits-C_ref_octave;
 const float C_tuning_cents = C_cents_per_octave*(C_octave_to_ref-floor(C_octave_to_ref));
-// calculate tuned frequencies (phase advances per clock)
-void freq_init(int transpose)
-{
-  int i;
-  // pitch bend frequency multiplier
-  // bend range +-1 halftone (100 cents, 1/12 octave)
-  pbm = (uint32_t *)malloc(sizeof(uint32_t) * pbm_range);
-  // this calculation takes time so lets play some tone
-  for(i = 0; i < pbm_range; i++)
-  {
-    *voice = 69 | ((400+(i&127))<<8);
-    pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_meantones) + (float)pbm_shift)+0.5;
-    *pitch = 1600000 - ((pbm[i]<<6)&0xF0FF0);
-  }
-  *voice = 69;
-  for(i = 0; i < (1 << C_voice_addr_bits); i++)
-  {
-    int octave = i / C_tones_per_octave;
-    int meantone = i % C_tones_per_octave;
-    int j = (i - transpose) % (1 << C_voice_addr_bits);
-    *voice = j;
-    freq[j] = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
-    *pitch = freq[j];
-  }
-}
-
-
 uint64_t db_sine1x    = 0x800000000L; // key + 0
 uint64_t db_sine3x    = 0x080000000L; // key + 19
 uint64_t db_sine2x    = 0x008000000L; // key + 12
@@ -163,8 +137,46 @@ const int C_voice_num = 1<<C_voice_addr_bits;
 
 int16_t active_keys[C_voice_num], active_bend[C_voice_num]; // tracks currently active keys and their bending
 
+// calculate tuned frequencies (phase advances per clock)
+void freq_init(int transpose)
+{
+  int i;
+  for(i = 0; i < (1 << C_voice_addr_bits); i++)
+  {
+    int octave = i / C_tones_per_octave;
+    int meantone = i % C_tones_per_octave;
+    int j = (i - transpose) % (1 << C_voice_addr_bits);
+    *voice = j;
+    freq[j] = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
+    *pitch = freq[j];
+  }
+}
+
+// background updating of the pitch bend range table
+// float math takes cca 20 seconds to fully recalculate
+void pitch_bend_background(void)
+{
+  static int16_t i = 0; // the running counter
+  // on each invocation, this will process one table entry from 16384
+  if(request_new_pitch_bend_range != 0)
+  {
+    i = pbm_range; // setting current voice counter will start recalculation
+    request_new_pitch_bend_range = 0; // clear request flag
+  }
+  if(i <= 0) // we're done
+    return;
+  i--; // decrement
+  // pitch bend frequency multiplier
+  // default bend range is +-1 halftone (100 cents, 1/12 octave)
+  // this calculation takes time so it's backgrounded
+  pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_meantones) + (float)pbm_shift)+0.5;
+}
+
+
 // after any drawbar change, we need to recalculate all voices
 // currently being played by active keys
+// but this takes time so (TODO) it should be backgrounded
+// to recalculate one voice at a time
 void voices_recalculate()
 {
   int i,j,key;
@@ -258,7 +270,7 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
           int16_t pitchbend = bend + 8192;
           if(bend < -8192) pitchbend = 0;
           if(bend > 8191) pitchbend = 16383;
-          uint64_t fbend = ((uint64_t)(freq[v]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;        
+          uint64_t fbend = ((uint64_t)(freq[v]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;
           *pitch = fbend;
         }
       }
@@ -288,15 +300,15 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 
 void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
-  static uint8_t recalc;
-  recalc++;
+  //static uint8_t recalc;
+  //recalc++;
     //if(channel == 1)
     {
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
       active_keys[pitch] = 0;
       active_bend[pitch] = 0;
-      if(recalc == 0)
-        voices_recalculate();
+      //if(recalc == 0)
+      //  voices_recalculate();
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
@@ -368,7 +380,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
       nshift = 4*(8-lower_drawbar_num);
       regmask = ~(0xFULL << nshift); // reset bits which will change
       reg_lower = (reg_lower & regmask) | (db_val << nshift);
-      voices_recalculate();
+      // voices_recalculate();
       break;
     case 16: // 16-23: upper drawbar turnknobs
     case 17:
@@ -383,7 +395,7 @@ void drawbar_register_change(byte channel, byte number, byte value)
       nshift = 4*(8-upper_drawbar_num);
       regmask = ~(0xFULL << nshift); // reset bits which will change
       reg_upper = (reg_upper & regmask) | (db_val << nshift);
-      voices_recalculate();
+      // voices_recalculate();
       break;
   }
 }
@@ -415,6 +427,12 @@ void setup()
 
     // Initiate MIDI communications, listen to all channels
     MIDI.begin(MIDI_CHANNEL_OMNI);
+
+    // allocate table for pitch bend change
+    pbm = (uint32_t *)malloc(sizeof(uint32_t) * pbm_range);
+    int i;
+    for(i = 0; i < pbm_range; i++)
+      pbm[i] = 1 << pbm_shift; // neutral intial value
 
     #if 0
     *voice = 69 | (1000<<8);
@@ -453,18 +471,19 @@ void loop()
 {
     // Call MIDI.read the fastest you can for real-time performance.
     MIDI.read();
-
     // There is no need to check if there are messages incoming
     // if they are bound to a Callback function.
     // The attached method will be called automatically
     // when the corresponding message has been received.
+    pitch_bend_background();
 }
 
 /* TODO
 [x] support setting range of pitch bend (bend_meantones)
-[ ] make pitch bend range change faster
+[ ] make pitch bend range change faster - request change process later
 [x] register changing with MIDI slider keyboard controls
 [ ] when drawbars change, noteoff will not work (must recalculate all active notes)
+[ ] request drawbar change, process later
 [ ] smooth register change (instead of 9-level ratcheted)
 [ ] reschedule voices
 */
