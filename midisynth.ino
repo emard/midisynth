@@ -175,7 +175,7 @@ void pitch_bend_background(void)
 
 // this will background-refresh each voice volume
 // setting, in case of some intermediate miscalculation
-// or after drawbar settings change 
+// or after each change of drawbar settings
 void voices_volume_recalculate_background()
 {
   static int16_t i; // running voice num counter if positive we are recalculating 
@@ -200,7 +200,7 @@ void voices_volume_recalculate_background()
       // drawbar registration setting for this key
       uint64_t r = key_num < 60 ? reg_lower : reg_upper;
       // downshift drawbar value to position at bit 0
-      r >>= 4*j;
+      r >>= 4*(drawbar_count-1-j);
       // delete all upper bits to get individual drawbar value
       uint8_t db_val = r & 0xF;
       uint16_t db_volume = (1 << db_val)/2; // 2^n function to linear volume
@@ -210,64 +210,6 @@ void voices_volume_recalculate_background()
   volume[i] = voice_vol;
   // apply recalculated volume to synth voice volume register
   *voice = i | (voice_vol << 8);
-}
-
-// after any drawbar change, we need to recalculate all voices
-// currently being played by active keys
-// but this takes time so (TODO) it should be backgrounded
-// to recalculate one voice at a time
-// for each voice, loop thru all drawbar setting, read the key value
-// that may affect this voice
-void voices_recalculate()
-{
-  int i,j,key;
-  uint8_t apply = 1;
-  int16_t bend = 0; // no bending (todo: memorize bendings)
-  uint64_t r;
-  uint8_t db_val;
-  int16_t db_volume;
-  int8_t v; // voice number
-  uint8_t a; // voice address
-
-  for(j = 0; j < C_voice_num; j++)
-    volume[j] = 0; // initially zero all voice volumes
-
-  for(key = 0; key < C_voice_num; key++) // loop thru all keys
-  {
-    int16_t vol = active_keys[key]; // volume of current key
-    r = key < 60 ? reg_lower : reg_upper; // its register
-    if(vol > 0)
-      for(i = drawbar_count-1; i >= 0; i--)
-      {
-        db_val = r & 15;
-        r >>= 4;
-        v = key+drawbar_voice[i]; // in case of overflow >127, "v" becomes negative
-        if(v >= 0 && db_val != 0) // if "v" is not negative means no overflow
-        {
-          db_volume = (1 << db_val)/2;
-          volume[v] += vol * db_volume; // accumulate volumes
-        }
-      }
-  }
-
-  if(apply)
-    for(a = 0; a < C_voice_num; a++)
-    {
-      bend = active_bend[a];
-      *voice = a | (volume[a] << 8);
-      if(bend == 0)
-      {
-        *pitch = freq[a];
-      }
-      else
-      {
-        int16_t pitchbend = bend + 8192;
-        if(bend < -8192) pitchbend = 0;
-        if(bend > 8191) pitchbend = 16383;
-        uint64_t fbend = ((uint64_t)(freq[a]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;
-        *pitch = fbend;
-      }
-    }
 }
 
 void reset_keys()
@@ -348,8 +290,8 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
       active_keys[pitch] = 0;
       active_bend[pitch] = 0;
-      if(recalc == 0)
-        voices_recalculate();
+      if(recalc == 0) // every 256 request recalculation of all voices
+        request_voices_volume_recalculate = 1;
       led_value ^= pitch;
       *led_indicator_pointer = led_value;
     }
