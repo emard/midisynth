@@ -287,8 +287,8 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
       key(pitch, -key_volume, 0, 1, pitch < 60 ? reg_lower : reg_upper);
       active_keys[pitch] -= key_volume;
       active_bend[pitch] = 0;
-      #if 0
-      if((recalc & 15) == 0) // every 16 notes request recalculation of all voices
+      #if 1
+      if(recalc == 0) // every 256 notes request recalculation of all voices
         request_voices_volume_recalculate = 1;
       #endif
       led_value ^= pitch;
