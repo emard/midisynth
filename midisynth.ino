@@ -35,7 +35,7 @@ volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev writte
 int16_t volume[128], target[128];
 uint8_t request_voices_volume_recalculate = 0;
 uint32_t freq[128]; // freqency list
-const int pbm_shift = 24, pbm_range = 16384;
+const int C_pbm_shift = 24, C_pbm_range = 16384;
 uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
 uint32_t *pbm; // pitch bend multiplier 0..16383
 uint8_t request_new_pitch_bend_range = 1; // request recalculation of pitch bend range
@@ -79,6 +79,24 @@ const float C_temperament[C_tones_per_octave] =
       1099.983921    // 11 B
 };
 
+#if 0
+const float C_temperament[C_tones_per_octave] =
+{ // Equal temperament
+         0.0,  //  0 C
+       100.0,  //  1 C#
+       200.0,  //  2 D
+       300.0,  //  3 Eb
+       400.0,  //  4 E
+       500.0,  //  5 F
+       600.0,  //  6 F#
+       700.0,  //  7 G
+       800.0,  //  8 G#
+       900.0,  //  9 A
+      1000.0,  // 10 Bb
+      1100.0   // 11 B
+};
+#endif
+
 // calculate base frequency, this is lowest possible A, meantone_temperament #9
 // downshifting by (C_voice_addr_bits+C_pa_data_bits) is moved to C_shift_octave to avoid floating underflow here
 const float C_base_freq = C_clk_freq*pow(2.0,C_temperament[C_ref_tone]/C_cents_per_octave);
@@ -121,7 +139,7 @@ uint64_t reg_lower = db_childintime_lower;
 // 40 keys - 10x frequency
 // 43 keys - 12x frequency
 // 48 keys - 16x frequency
-const int drawbar_count = 9;
+const int C_drawbar_count = 9;
 int8_t drawbar_voice[9] = {0,19,12,24,31,36,40,43,48}; // voice offset for drawbars
 
 int key_volume = 1; // key volume 1-7
@@ -154,7 +172,7 @@ void pitch_bend_background(void)
   // on each invocation, this will process one table entry from 16384
   if(request_new_pitch_bend_range != 0)
   {
-    i = pbm_range; // setting current voice counter will start recalculation
+    i = C_pbm_range; // setting current voice counter will start recalculation
     request_new_pitch_bend_range = 0; // clear request flag
   }
   if(i <= 0) // we're done
@@ -164,7 +182,7 @@ void pitch_bend_background(void)
   // default bend range is +-1 halftone (100 cents, 1/12 octave)
   // this calculation takes time so it's backgrounded
   // (but it's still too slow so serial port looses bytes)
-  pbm[i] = pow(2.0, (float)(i-(pbm_range/2))/((float)(12*pbm_range/2))*(float)(bend_meantones) + (float)pbm_shift)+0.5;
+  pbm[i] = pow(2.0, (float)(i-(C_pbm_range/2))/((float)(12*C_pbm_range/2))*(float)(bend_meantones) + (float)C_pbm_shift)+0.5;
   // delay(1); // not even 1 ms delay is tolerated here
 }
 
@@ -187,7 +205,7 @@ void voices_volume_recalculate_background()
   // for voice i, accumulate key volumes thru all relevant drawbars
   int32_t voice_vol = 0;
   int16_t j; // drawbar counter
-  for(j = 0; j < drawbar_count; j++)
+  for(j = 0; j < C_drawbar_count; j++)
   {
     int key_num = i - drawbar_voice[j]; // some lower pitch key may contribute to this voice
     if(key_num >= 0 && key_num <= 127)
@@ -198,7 +216,7 @@ void voices_volume_recalculate_background()
         // determine drawbar value for this key
         uint64_t r = key_num < 60 ? reg_lower : reg_upper;
         // downshift drawbar value to position at bit 0
-        r >>= 4*(drawbar_count-1-j);
+        r >>= 4*(C_drawbar_count-1-j);
         // delete all upper bits to get individual drawbar value
         uint8_t db_val = r & 0xF;
         if(db_val)
@@ -237,7 +255,7 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
   uint8_t db_val;
   int16_t db_volume;
   int8_t v; // voice number
-  for(i = drawbar_count-1; i >= 0; i--)
+  for(i = C_drawbar_count-1; i >= 0; i--)
   {
     db_val = r & 15;
     r >>= 4;
@@ -258,7 +276,7 @@ void key(uint8_t key, int16_t vol, int16_t bend, uint8_t apply, uint64_t registr
           int16_t pitchbend = bend + 8192;
           if(bend < -8192) pitchbend = 0;
           if(bend > 8191) pitchbend = 16383;
-          uint64_t fbend = ((uint64_t)(freq[v]) * (uint64_t)(pbm[pitchbend])) >> pbm_shift;
+          uint64_t fbend = ((uint64_t)(freq[v]) * (uint64_t)(pbm[pitchbend])) >> C_pbm_shift;
           *pitch = fbend;
         }
       }
@@ -435,10 +453,10 @@ void handleControlChange(byte channel, byte number, byte value)
 void setup()
 {
     // allocate table for pitch bend change
-    pbm = (uint32_t *)malloc(sizeof(uint32_t) * pbm_range);
+    pbm = (uint32_t *)malloc(sizeof(uint32_t) * C_pbm_range);
     int i;
-    for(i = 0; i < pbm_range; i++)
-      pbm[i] = 1 << pbm_shift; // neutral intial value (multiply by 1)
+    for(i = 0; i < C_pbm_range; i++)
+      pbm[i] = 1 << C_pbm_shift; // neutral intial value (multiply by 1)
 
     #if 0
     *voice = 69 | (1000<<8);
