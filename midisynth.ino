@@ -165,31 +165,7 @@ void freq_init(int transpose)
   }
 }
 
-// background updating of the pitch bend range table
-// float math takes cca 20 seconds to fully recalculate
-#if 0
-void pitch_bend_background(void)
-{
-  static int16_t i = -1; // the running counter
-  // on each invocation, this will process one table entry from 16384
-  if(request_new_pitch_bend_range != 0)
-  {
-    i = C_pbm_range; // setting current voice counter will start recalculation
-    request_new_pitch_bend_range = 0; // clear request flag
-  }
-  if(i <= 0) // we're done
-    return;
-  i--; // decrement
-  // pitch bend frequency multiplier
-  // default bend range is +-1 halftone (100 cents, 1/12 octave)
-  // this calculation takes time so it's backgrounded
-  // (but it's still too slow so serial port looses bytes)
-  pbm[i] = pow(2.0, (float)(i-(C_pbm_range/2))/((float)(12*C_pbm_range/2))*(float)(bend_meantones) + (float)C_pbm_shift)+0.5;
-  // delay(1); // not even 1 ms delay is tolerated here
-}
-#endif
-
-// calculate 128 start values for the pitchbends
+// calculate 128 start values for various pitchbend ranges
 void pitch_bend_init(void)
 {
   int i, j;
@@ -200,12 +176,13 @@ void pitch_bend_init(void)
     pb_start[i] = pow(2.0, (double)(-(C_pbm_range/2))/((double)(12*C_pbm_range/2))*(double)(i) + (double)(C_pbm_shift));
   }
 
-  // allocate table for pitch bend change
+  // allocate table for pitch bend range change
   pbm = (uint32_t *)malloc(sizeof(uint32_t) * C_pbm_range);
   for(i = 0; i < C_pbm_range; i++)
     pbm[i] = 1 << C_pbm_shift; // neutral intial value (multiply by 1)
 }
 
+// background updating of the pitch bend range table
 void pitch_bend_background(void)
 {
   static int16_t i = 0; // the running counter
@@ -405,13 +382,15 @@ void pitch_bend_range_change(byte channel, byte number, byte value)
       if(active_parameter[1] == 0 && active_parameter[0] == 0)
       {
         // change pitch bend range, value in meantones
+        #if 0 // we have already 0->2 in tables pb_inc, pb_starts
         if(value == 0)
           bend_meantones = 2; // 0 is the same as 2
         else
+        #endif
           bend_meantones = value;
         // attention - lengthy math, after changing bend_meantones,
-        // the whole pitch bend table must be recalculated
-        freq_init(0);
+        // the whole pitch bend table must be recalculated in the backgroud
+        request_new_pitch_bend_range = 1;
       }
       break;
     case 38: // Data Entry LSB
