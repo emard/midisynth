@@ -38,6 +38,7 @@ uint32_t freq[128]; // freqency list
 const int C_pbm_shift = 24, C_pbm_range = 16384;
 uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
 uint32_t *pbm; // pitch bend multiplier 0..16383
+double pb_inc[128], pb_start[128]; // pitchbend increment and start for each integer range 0-127
 uint8_t request_new_pitch_bend_range = 1; // request recalculation of pitch bend range
 
 uint8_t active_parameter[2] = {127,127}; // MSB[1], LSB[0] of currently active parameter
@@ -166,6 +167,7 @@ void freq_init(int transpose)
 
 // background updating of the pitch bend range table
 // float math takes cca 20 seconds to fully recalculate
+#if 0
 void pitch_bend_background(void)
 {
   static int16_t i = -1; // the running counter
@@ -184,6 +186,49 @@ void pitch_bend_background(void)
   // (but it's still too slow so serial port looses bytes)
   pbm[i] = pow(2.0, (float)(i-(C_pbm_range/2))/((float)(12*C_pbm_range/2))*(float)(bend_meantones) + (float)C_pbm_shift)+0.5;
   // delay(1); // not even 1 ms delay is tolerated here
+}
+#endif
+
+// calculate 128 start values for the pitchbends
+void pitch_bend_init(void)
+{
+  int i, j;
+  for(j = 0; j < 128; j++)
+  {
+    i = j > 0 ? j : 2; // pitch bend 0 is the same as 2
+    pb_inc[i] = pow(2.0, 1.0/((double)(12*C_pbm_range/2))*(double)(i));
+    pb_start[i] = pow(2.0, (double)(-(C_pbm_range/2))/((double)(12*C_pbm_range/2))*(double)(i) + (double)(C_pbm_shift));
+  }
+
+  // allocate table for pitch bend change
+  pbm = (uint32_t *)malloc(sizeof(uint32_t) * C_pbm_range);
+  for(i = 0; i < C_pbm_range; i++)
+    pbm[i] = 1 << C_pbm_shift; // neutral intial value (multiply by 1)
+}
+
+void pitch_bend_background(void)
+{
+  static int16_t i = 0; // the running counter
+  static double increment, pitch_bend;
+  // on each invocation, this will process one table entry from 16384
+  if(request_new_pitch_bend_range != 0)
+  {
+    i = 0; // setting current voice counter will start recalculation
+    increment = pb_inc[bend_meantones];
+    pitch_bend = pb_start[bend_meantones];
+    request_new_pitch_bend_range = 0; // clear request flag
+  }
+  if(i >= C_pbm_range) // we're done
+    return;
+  // pitch bend frequency multiplier
+  // default bend range is +-1 halftone (100 cents, 1/12 octave)
+  // this calculation takes time so it's backgrounded
+  // (but it's still too slow so serial port looses bytes)
+  // pbm[i] = pow(2.0, (double)(i-(C_pbm_range/2))/((double)(12*C_pbm_range/2))*(double)(bend_meantones) + (double)(C_pbm_shift));
+  // delay(1); // not even 1 ms delay is tolerated here
+  pbm[i] = pitch_bend * (1 << C_pbm_shift) + 0.5;
+  pitch_bend *= increment;
+  i++; // increment
 }
 
 // this will background-refresh each voice volume
@@ -452,11 +497,8 @@ void handleControlChange(byte channel, byte number, byte value)
 
 void setup()
 {
-    // allocate table for pitch bend change
-    pbm = (uint32_t *)malloc(sizeof(uint32_t) * C_pbm_range);
-    int i;
-    for(i = 0; i < C_pbm_range; i++)
-      pbm[i] = 1 << C_pbm_shift; // neutral intial value (multiply by 1)
+
+    pitch_bend_init();
 
     #if 0
     *voice = 69 | (1000<<8);
