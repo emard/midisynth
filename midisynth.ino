@@ -33,13 +33,15 @@ volatile uint32_t *led_indicator_pointer; // address of LED MMIO register
 volatile uint32_t *voice = (uint32_t *)0xFFFFFBB0; // voices
 volatile uint32_t *pitch  = (uint32_t *)0xFFFFFBB4; // frequency for prev written voice
 int16_t volume[128], target[128];
+int8_t transpose = 0; // number of meantones to shift +/-
+uint8_t request_freq_table = 1;
 uint8_t request_voices_volume_recalculate = 0;
 uint32_t freq[128]; // freqency list
 const int C_pbm_shift = 24, C_pbm_range = 16384;
 uint8_t bend_meantones = 2; // 2 is default, can have range 1-127
 uint32_t *pbm; // pitch bend multiplier 0..16383
 double pb_inc[128], pb_start[128]; // pitchbend increment and start for each integer range 0-127
-uint8_t request_new_pitch_bend_range = 1; // request recalculation of pitch bend range
+uint8_t request_pitch_bend_range = 1; // request recalculation of pitch bend range
 
 uint8_t active_parameter[2] = {127,127}; // MSB[1], LSB[0] of currently active parameter
 // see http://www.philrees.co.uk/nrpnq.htm
@@ -59,6 +61,40 @@ const int C_pa_data_bits = 32;
 const int C_voice_addr_bits = 7; // 128 voices MIDI standard
 const int C_tones_per_octave = 12; // tones per octave, MIDI standard
 const float C_cents_per_octave = 1200.0; // cents (tuning) per octave
+
+// Quarter comma temperament (16th century standard)
+const float C_temperament_quarter_comma[C_tones_per_octave] =
+{ // Quarter comma temperament, 16th century classic
+         0.0,        //  0 C
+        76.0,        //  1 C#
+       193.2,        //  2 D
+       310.3,        //  3 Eb
+       386.3,        //  4 E
+       503.4,        //  5 F
+       579.5,        //  6 F#
+       696.6,        //  7 G
+       772.6,        //  8 G#
+       889.7,        //  9 A
+      1006.8,        // 10 Bb
+      1082.9         // 11 B
+};
+
+// Bach's tuning http://www.larips.com/
+const float C_temperament_bach[C_tones_per_octave] =
+{ // Bach Well Tempered Clavier 1722
+         5.9,        //  0 C
+       103.9,        //  1 C#
+       202.0,        //  2 D
+       303.9,        //  3 Eb
+       398.0,        //  4 E
+       507.8,        //  5 F
+       602.0,        //  6 F#
+       703.9,        //  7 G
+       803.9,        //  8 G#
+       900.0,        //  9 A
+      1003.9,        // 10 Bb
+      1100.0         // 11 B
+};
 
 // Standard MIDI has equal temperament (100 cents each)
 // Hammond tried to make it, but tonewheels were slightly off-tune
@@ -80,21 +116,20 @@ const float C_temperament_hammond[C_tones_per_octave] =
       1099.983921    // 11 B
 };
 
-// Bach's tuning http://www.larips.com/
-const float C_temperament_bach[C_tones_per_octave] =
-{ // Bach Well Tempered Clavier 1722
-         5.9,        //  0 C
-       103.9,        //  1 C#
-       202.0,        //  2 D
-       303.9,        //  3 Eb
-       398.0,        //  4 E
-       507.8,        //  5 F
-       602.0,        //  6 F#
-       703.9,        //  7 G
-       803.9,        //  8 G#
-       900.0,        //  9 A
-      1003.9,        // 10 Bb
-      1100.0         // 11 B
+const float C_temperament_ben_johnston[C_tones_per_octave] =
+{ // Ben Johnston's Suite for Microtonal Piano (1977)
+         0.0,  //  0 C
+       105.0,  //  1 C#
+       203.9,  //  2 D
+       297.5,  //  3 Eb
+       386.3,  //  4 E
+       470.8,  //  5 F
+       551.3,  //  6 F#
+       702.0,  //  7 G
+       840.5,  //  8 G#
+       905.9,  //  9 A
+       968.8,  // 10 Bb
+      1088.3   // 11 B
 };
 
 const float C_temperament_equal[C_tones_per_octave] =
@@ -168,6 +203,7 @@ const int C_voice_num = 1<<C_voice_addr_bits;
 int16_t active_keys[C_voice_num], active_bend[C_voice_num]; // tracks currently active keys and their bending
 
 // calculate tuned frequencies (phase advances per clock)
+#if 0
 void freq_init(int transpose)
 {
   int i;
@@ -180,6 +216,30 @@ void freq_init(int transpose)
     freq[j] = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
     *pitch = freq[j];
   }
+}
+#endif
+
+// background recalculate note frequency table
+// after changing of the temperament
+void freq_table_background(void)
+{
+  static int16_t i = -1; // running voice num counter if positive we are recalculating 
+  if(request_freq_table != 0)
+  {
+    i = C_voice_num;
+    request_freq_table = 0; // clear request flag
+  }
+  if(i <= 0) // we're done
+  {
+    return;
+  }
+  i--;
+  int octave = i / C_tones_per_octave;
+  int meantone = i % C_tones_per_octave;
+  uint16_t j = (i - transpose) & ((1 << C_voice_addr_bits)-1);
+  *voice = j | (volume[j] << 8);
+  freq[j] = pow(2.0, C_shift_octave+octave+(C_temperament[meantone]+C_tuning_cents)/C_cents_per_octave)+0.5;
+  *pitch = freq[j];
 }
 
 // calculate 128 start values for various pitchbend ranges
@@ -205,12 +265,12 @@ void pitch_bend_background(void)
   static int16_t i = 0; // the running counter
   static double increment, pitch_bend;
   // on each invocation, this will process one table entry from 16384
-  if(request_new_pitch_bend_range != 0)
+  if(request_pitch_bend_range != 0)
   {
     i = 0; // setting current voice counter will start recalculation
     increment = pb_inc[bend_meantones];
     pitch_bend = pb_start[bend_meantones];
-    request_new_pitch_bend_range = 0; // clear request flag
+    request_pitch_bend_range = 0; // clear request flag
   }
   if(i >= C_pbm_range) // we're done
     return;
@@ -407,7 +467,7 @@ void pitch_bend_range_change(byte channel, byte number, byte value)
           bend_meantones = value;
         // attention - lengthy math, after changing bend_meantones,
         // the whole pitch bend table must be recalculated in the backgroud
-        request_new_pitch_bend_range = 1;
+        request_pitch_bend_range = 1;
       }
       break;
     case 38: // Data Entry LSB
@@ -467,15 +527,61 @@ void drawbar_register_change(byte channel, byte number, byte value)
   }
 }
 
+// temperament preset and reset keys
 void emergency_reset_keys_control(byte channel, byte number, byte value)
 {
   static uint8_t old_reset = 0;
+  static uint8_t old_temperament_ben_johnston = 0;
+  static uint8_t old_temperament_quarter_comma = 0;
+  static uint8_t old_temperament_bach = 0;
+  static uint8_t old_temperament_hammond = 0;
+  static uint8_t old_temperament_equal = 0;
   switch(number) // controller number
   {
-    case 43: // lower left key (rewind button) resets all notes (in case they got stuck)
+    case 46: // emergency reset: left key labeled "cycle" resets all notes (in case they got stuck
       if(value == 127 && old_reset == 0)
         reset_keys();
       old_reset = value;
+      break;
+    case 43: // key "<<" Ben Johnston's temperament 1977
+      if(value == 127 && old_temperament_ben_johnston == 0)
+      {
+        C_temperament = C_temperament_ben_johnston;
+        request_freq_table = 1;
+      }
+      old_temperament_ben_johnston = value;
+      break;
+    case 44: // key ">>" quarter comma temperament 16th century
+      if(value == 127 && old_temperament_quarter_comma == 0)
+      {
+        C_temperament = C_temperament_quarter_comma;
+        request_freq_table = 1;
+      }
+      old_temperament_quarter_comma = value;
+      break;
+    case 42: // key "[]" bach temperament 18th century
+      if(value == 127 && old_temperament_bach == 0)
+      {
+        C_temperament = C_temperament_bach;
+        request_freq_table = 1;
+      }
+      old_temperament_bach = value;
+      break;
+    case 41: // key ">" hammond temperament 20th century
+      if(value == 127 && old_temperament_hammond == 0)
+      {
+        C_temperament = C_temperament_hammond;
+        request_freq_table = 1;
+      }
+      old_temperament_hammond = value;
+      break;
+    case 45: // key "O" equal temperament contemporary
+      if(value == 127 && old_temperament_equal == 0)
+      {
+        C_temperament = C_temperament_equal;
+        request_freq_table = 1;
+      }
+      old_temperament_equal = value;
       break;
   }
 }
@@ -493,7 +599,7 @@ void handleControlChange(byte channel, byte number, byte value)
 
 void setup()
 {
-
+    reset_keys();
     pitch_bend_init();
 
     #if 0
@@ -506,10 +612,10 @@ void setup()
     #endif
 
     reset_keys();
-    freq_init(0);
     led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
 
-    #if 1
+    #if 0
+    freq_init(0);
     key(69,7,0,1,db_sine1x);
     *led_indicator_pointer = 255;
     delay(500);
@@ -546,7 +652,6 @@ void setup()
 
     // Initiate MIDI communications, listen to all channels
     MIDI.begin(MIDI_CHANNEL_OMNI);
-
 }
 
 void loop()
@@ -557,6 +662,7 @@ void loop()
     // if they are bound to a Callback function.
     // The attached method will be called automatically
     // when the corresponding message has been received.
+    freq_table_background();
     pitch_bend_background();
     voices_volume_recalculate_background();
 }
