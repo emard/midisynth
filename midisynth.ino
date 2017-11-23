@@ -64,7 +64,7 @@ const float C_cents_per_octave = 1200.0; // cents (tuning) per octave
 // Hammond tried to make it, but tonewheels were slightly off-tune
 // because a wheel could have no more than 192 teeth.
 // Real notes must be a little bit off-tune in order to sound correct :)
-const float C_temperament[C_tones_per_octave] =
+const float C_temperament_hammond[C_tones_per_octave] =
 { // Hammond temperament
          0.0,        //  0 C
         99.89267627, //  1 C#
@@ -80,8 +80,24 @@ const float C_temperament[C_tones_per_octave] =
       1099.983921    // 11 B
 };
 
-#if 0
-const float C_temperament[C_tones_per_octave] =
+// Bach's tuning http://www.larips.com/
+const float C_temperament_bach[C_tones_per_octave] =
+{ // Bach Well Tempered Clavier 1722
+         5.9,        //  0 C
+       103.9,        //  1 C#
+       202.0,        //  2 D
+       303.9,        //  3 Eb
+       398.0,        //  4 E
+       507.8,        //  5 F
+       602.0,        //  6 F#
+       703.9,        //  7 G
+       803.9,        //  8 G#
+       900.0,        //  9 A
+      1003.9,        // 10 Bb
+      1100.0         // 11 B
+};
+
+const float C_temperament_equal[C_tones_per_octave] =
 { // Equal temperament
          0.0,  //  0 C
        100.0,  //  1 C#
@@ -96,7 +112,8 @@ const float C_temperament[C_tones_per_octave] =
       1000.0,  // 10 Bb
       1100.0   // 11 B
 };
-#endif
+
+const float *C_temperament = C_temperament_hammond;
 
 // calculate base frequency, this is lowest possible A, meantone_temperament #9
 // downshifting by (C_voice_addr_bits+C_pa_data_bits) is moved to C_shift_octave to avoid floating underflow here
@@ -546,11 +563,12 @@ void loop()
 
 /* TODO
 [x] support setting range of pitch bend (bend_meantones)
-[ ] make pitch bend range change faster - request change process later
+[x] make pitch bend range change faster - request change process later
 [x] register changing with MIDI slider keyboard controls
-[ ] when drawbars change, noteoff will not work (must recalculate all active notes)
-[ ] request drawbar change, process later
+[x] when drawbars change, noteoff will not work (must recalculate all active notes)
+[x] request drawbar change, process later
 [ ] smooth register change (instead of 9-level ratcheted)
 [ ] reschedule voices
+[ ] temperament preset keys: equal, hammond, bach etc.
 */
 
