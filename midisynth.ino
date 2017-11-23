@@ -341,6 +341,7 @@ void reset_keys()
     active_bend[i] = 0;
     volume[i] = 0;
     *voice = i;
+    led_value = 0;
   }
 }
 
