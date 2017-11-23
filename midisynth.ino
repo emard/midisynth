@@ -226,7 +226,7 @@ void pitch_bend_background(void)
   // (but it's still too slow so serial port looses bytes)
   // pbm[i] = pow(2.0, (double)(i-(C_pbm_range/2))/((double)(12*C_pbm_range/2))*(double)(bend_meantones) + (double)(C_pbm_shift));
   // delay(1); // not even 1 ms delay is tolerated here
-  pbm[i] = pitch_bend * (1 << C_pbm_shift) + 0.5;
+  pbm[i] = pitch_bend + 0.5;
   pitch_bend *= increment;
   i++; // increment
 }
