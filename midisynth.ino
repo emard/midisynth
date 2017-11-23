@@ -342,6 +342,7 @@ void reset_keys()
     volume[i] = 0;
     *voice = i;
     led_value = 0;
+    *led_indicator_pointer = 0;
   }
 }
 
@@ -600,8 +601,9 @@ void handleControlChange(byte channel, byte number, byte value)
 
 void setup()
 {
-    reset_keys();
     pitch_bend_init();
+    led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
+    reset_keys();
 
     #if 0
     *voice = 69 | (1000<<8);
@@ -611,9 +613,6 @@ void setup()
     delay(500);
     *voice = 69;
     #endif
-
-    reset_keys();
-    led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
 
     #if 0
     freq_init(0);
@@ -676,6 +675,8 @@ void loop()
 [x] request drawbar change, process later
 [ ] smooth register change (instead of 9-level ratcheted)
 [ ] reschedule voices
-[ ] temperament preset keys: equal, hammond, bach etc.
+[x] temperament preset keys: equal, hammond, bach etc.
+[ ] after changed temperament, the tuning constants need
+    to be recalculated because tuning reference note A (440Hz) may change
 */
 
