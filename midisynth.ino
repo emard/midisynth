@@ -397,7 +397,7 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
   static uint8_t recalc = 0;
   recalc++;
-    //if(channel == 1)
+    if(channel != 10) // everything except drum channel
     {
       #if 1
       if(active_keys[pitch] <= 0)
@@ -420,7 +420,7 @@ void handleNoteOff(byte channel, byte pitch, byte velocity)
 
 void handleNoteOn(byte channel, byte pitch, byte velocity)
 {
-    //if(channel == 1)
+    if(channel != 10) // everything except drum channel
     {
       if(velocity == 0)
       {
