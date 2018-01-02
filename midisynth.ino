@@ -150,15 +150,27 @@ const float C_temperament_equal[C_tones_per_octave] =
 
 const float *C_temperament = C_temperament_hammond;
 
-// calculate base frequency, this is lowest possible A, meantone_temperament #9
-// downshifting by (C_voice_addr_bits+C_pa_data_bits) is moved to C_shift_octave to avoid floating underflow here
-const float C_base_freq = C_clk_freq*pow(2.0,C_temperament[C_ref_tone]/C_cents_per_octave);
-// calculate how many octaves (floating point) we need to go up to reach C_ref_freq
-const float C_octave_to_ref = log(C_ref_freq/C_base_freq)/log(2.0);
-// convert real C_octave_to_ref into octave integer and cents tuning
-// now shift by (C_voice_addr_bits+C_pa_data_bits)
-const int C_shift_octave = (int)(floor(C_octave_to_ref))+C_voice_addr_bits+C_pa_data_bits-C_ref_octave;
-const float C_tuning_cents = C_cents_per_octave*(C_octave_to_ref-floor(C_octave_to_ref));
+// tuning constants (not true constants anymore)
+float C_base_freq, C_octave_to_ref, C_tuning_cents;
+int C_shift_octave;
+
+// this must be called initially and after each re-tuning
+// it is recommended to be called also after
+// changing of temperament if referent
+// note A (440Hz) changes its cents value.
+void tuning_constants_init(void)
+{
+  // calculate base frequency, this is lowest possible A, meantone_temperament #9
+  // downshifting by (C_voice_addr_bits+C_pa_data_bits) is moved to C_shift_octave to avoid floating underflow here
+  C_base_freq = C_clk_freq*pow(2.0,C_temperament[C_ref_tone]/C_cents_per_octave);
+  // calculate how many octaves (floating point) we need to go up to reach C_ref_freq
+  C_octave_to_ref = log(C_ref_freq/C_base_freq)/log(2.0);
+  // convert real C_octave_to_ref into octave integer and cents tuning
+  // now shift by (C_voice_addr_bits+C_pa_data_bits)
+  C_shift_octave = (int)(floor(C_octave_to_ref))+C_voice_addr_bits+C_pa_data_bits-C_ref_octave;
+  C_tuning_cents = C_cents_per_octave*(C_octave_to_ref-floor(C_octave_to_ref));
+}
+
 uint64_t db_sine1x    = 0x800000000L; // key + 0
 uint64_t db_sine3x    = 0x080000000L; // key + 19
 uint64_t db_sine2x    = 0x008000000L; // key + 12
@@ -602,6 +614,7 @@ void handleControlChange(byte channel, byte number, byte value)
 void setup()
 {
     pitch_bend_init();
+    tuning_constants_init();
     led_indicator_pointer = portOutputRegister(digitalPinToPort(led_indicator_pin));
     reset_keys();
 
